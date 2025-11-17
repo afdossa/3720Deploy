@@ -207,4 +207,3 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, 
       </>
   );
 };
-//Push reset2
