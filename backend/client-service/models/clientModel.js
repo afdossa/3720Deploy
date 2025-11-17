@@ -1,78 +1,71 @@
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
-//Connect to shared database system in sql lite
+// Connect to shared SQLite DB
 const dbPath = path.join(__dirname, '../../shared-db/database.sqlite');
-const db = new sqlite3.Database(dbPath);
+const db = new Database(dbPath);
 
-//initialize database on first run
-db.serialize(() => {
-    //this will create tables if they don't exist
-    const initScript = require('fs').readFileSync(
-        path.join(__dirname, '../../shared-db/init.sql'), 
-        'utf8'
-    );
-    db.exec(initScript, (err) => {
-        if (err) {
-            console.error('Database could not be created:', err);
-        } else {
-            console.log('Database initialized successfully');
-        }
-    });
-});
+// Initialize database (runs .sql script once)
+const initScript = fs.readFileSync(
+    path.join(__dirname, '../../shared-db/init.sql'),
+    'utf8'
+);
+
+try {
+    db.exec(initScript);
+    console.log("Database initialized successfully");
+} catch (err) {
+    console.error("Database initialization failed:", err);
+}
 
 /**
  * Fetches all events from SQLite database
- * @returns {Promise<Array>} Array of event objects
+ * @returns {Array} Array of event objects
  */
 const getEvents = () => {
-    return new Promise((resolve, reject) => {
-        const sql = `SELECT id, name, date, tickets_available FROM events`;
-        db.all(sql, [], (err, rows) => {
-            if (err) {
-                console.error('Database error in getEvents:', err);
-                reject(err);
-            } else {
-                console.log(`Fetched ${rows.length} events from database`);
-                resolve(rows);
-            }
-        });
-    });
+    try {
+        const stmt = db.prepare("SELECT id, name, date, tickets_available FROM events");
+        const rows = stmt.all();
+        console.log(`Fetched ${rows.length} events from database`);
+        return rows;
+    } catch (err) {
+        console.error("Database error in getEvents:", err);
+        throw err;
+    }
 };
 
 /**
- * Purchases a ticket with concurrency protection
- * @param {number} eventId - The ID of the event
- * @returns {Promise<boolean>} True if purchase succeeded
+ * Purchases a ticket using a safe transaction
+ * @param {number} eventId
+ * @returns {boolean} True if purchase succeeded
  */
 const purchaseTicket = (eventId) => {
-    return new Promise((resolve, reject) => {
-        db.serialize(() => {
-            db.run('BEGIN TRANSACTION');
-
-            const sql = `
-                UPDATE events 
-                SET tickets_available = tickets_available - 1 
+    try {
+        const purchaseTransaction = db.transaction((id) => {
+            const stmt = db.prepare(`
+                UPDATE events
+                SET tickets_available = tickets_available - 1
                 WHERE id = ? AND tickets_available > 0
-            `;
-            
-            db.run(sql, [eventId], function(err) {
-                if (err) {
-                    db.run('ROLLBACK');
-                    console.error('Database error in purchaseTicket:', err);
-                    reject(err);
-                } else if (this.changes > 0) {
-                    db.run('COMMIT');
-                    console.log(`Ticket purchased for event ${eventId}`);
-                    resolve(true);
-                } else {
-                    db.run('ROLLBACK');
-                    console.log(`No tickets available for event ${eventId}`);
-                    resolve(false);
-                }
-            });
+            `);
+
+            const result = stmt.run(id);
+            return result.changes > 0;
         });
-    });
+
+        const success = purchaseTransaction(eventId);
+
+        if (success) {
+            console.log(`Ticket purchased for event ${eventId}`);
+        } else {
+            console.log(`No tickets available for event ${eventId}`);
+        }
+
+        return success;
+    } catch (err) {
+        console.error("Database error in purchaseTicket:", err);
+        throw err;
+    }
 };
 
 module.exports = { getEvents, purchaseTicket };
