@@ -1,71 +1,88 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
+const fs = require("fs");
+const path = require("path");
+const initSqlJs = require("sql.js");
 
-// Connect to shared SQLite DB
-const dbPath = path.join(__dirname, '../../shared-db/database.sqlite');
-const db = new Database(dbPath);
+// Load database file from shared-db
+const dbPath = path.join(__dirname, "../../shared-db/database.sqlite");
+const initScriptPath = path.join(__dirname, "../../shared-db/init.sql");
 
-// Initialize database (runs .sql script once)
-const initScript = fs.readFileSync(
-    path.join(__dirname, '../../shared-db/init.sql'),
-    'utf8'
-);
+let db; // will hold the in-memory SQL.js database
 
-try {
-    db.exec(initScript);
+async function initializeDatabase() {
+    const SQL = await initSqlJs();
+
+    // load existing file or create new
+    let fileBuffer;
+    if (fs.existsSync(dbPath)) {
+        fileBuffer = fs.readFileSync(dbPath);
+        db = new SQL.Database(fileBuffer);
+    } else {
+        db = new SQL.Database();
+    }
+
+    // Run init.sql every startup (it only creates tables if missing)
+    const initSQL = fs.readFileSync(initScriptPath, "utf8");
+    db.run(initSQL);
+
+    // Save DB back to file
+    saveDatabase();
     console.log("Database initialized successfully");
-} catch (err) {
-    console.error("Database initialization failed:", err);
+}
+
+function saveDatabase() {
+    const data = Buffer.from(db.export());
+    fs.writeFileSync(dbPath, data);
 }
 
 /**
- * Fetches all events from SQLite database
- * @returns {Array} Array of event objects
+ * Fetch all events
  */
-const getEvents = () => {
+function getEvents() {
     try {
         const stmt = db.prepare("SELECT id, name, date, tickets_available FROM events");
-        const rows = stmt.all();
-        console.log(`Fetched ${rows.length} events from database`);
-        return rows;
-    } catch (err) {
-        console.error("Database error in getEvents:", err);
-        throw err;
-    }
-};
+        const rows = [];
 
-/**
- * Purchases a ticket using a safe transaction
- * @param {number} eventId
- * @returns {boolean} True if purchase succeeded
- */
-const purchaseTicket = (eventId) => {
-    try {
-        const purchaseTransaction = db.transaction((id) => {
-            const stmt = db.prepare(`
-                UPDATE events
-                SET tickets_available = tickets_available - 1
-                WHERE id = ? AND tickets_available > 0
-            `);
-
-            const result = stmt.run(id);
-            return result.changes > 0;
-        });
-
-        const success = purchaseTransaction(eventId);
-
-        if (success) {
-            console.log(`Ticket purchased for event ${eventId}`);
-        } else {
-            console.log(`No tickets available for event ${eventId}`);
+        while (stmt.step()) {
+            rows.push(stmt.getAsObject());
         }
 
-        return success;
+        stmt.free();
+        return rows;
     } catch (err) {
-        console.error("Database error in purchaseTicket:", err);
+        console.error("getEvents error:", err);
         throw err;
     }
-};
+}
 
-module.exports = { getEvents, purchaseTicket };
+/**
+ * Purchase a ticket (transaction simulated)
+ */
+function purchaseTicket(eventId) {
+    try {
+        // Check available tickets
+        const check = db.prepare("SELECT tickets_available FROM events WHERE id = ?");
+        check.bind([eventId]);
+        check.step();
+        const row = check.getAsObject();
+        check.free();
+
+        if (!row || row.tickets_available <= 0) {
+            console.log("No tickets available");
+            return false;
+        }
+
+        // Reduce ticket count
+        db.run("UPDATE events SET tickets_available = tickets_available - 1 WHERE id = ?", [eventId]);
+
+        // Save file
+        saveDatabase();
+
+        console.log(`Ticket purchased for event ${eventId}`);
+        return true;
+    } catch (err) {
+        console.error("purchaseTicket error:", err);
+        throw err;
+    }
+}
+
+module.exports = { initializeDatabase, getEvents, purchaseTicket };
