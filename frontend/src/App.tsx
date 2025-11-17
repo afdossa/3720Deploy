@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Send, Loader2, ShoppingCart, MessageSquare, Bot, User, CheckCircle, XCircle } from 'lucide-react';
 
 // --- Global API Key and Configuration ---
-const API_KEY = typeof __api_key !== 'undefined' ? __api_key : ''; // Canvas API Key
+const API_KEY = typeof __api_key !== 'undefined' ? __api_key : 'AIzaSyBv69e52kItIMFiYqyneoPD_urYiaTggWo'; // Canvas API Key
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 const MAX_RETRIES = 3;
 
