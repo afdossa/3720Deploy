@@ -8,7 +8,8 @@ import { ChatMessage } from './components/ChatMessage';
 import { ChatInput } from './components/ChatInput';
 import { MessageSender } from './types';
 
-const API_BASE_URL = 'http://localhost:6001/api';
+const API_BASE_URL = 'https://three720deploy.onrender.com/api';
+
 
 type ActiveTab = 'events' | 'chat';
 
