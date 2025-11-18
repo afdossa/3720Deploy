@@ -11,7 +11,7 @@ import { MessageSender } from './types';
 const API_BASE_URL = 'https://three720deploy.onrender.com/api';
 const GEMINI_API_KEY = typeof __api_key !== 'undefined' ? __api_key : 'AIzaSyBv69e52kItIMFiYqyneoPD_urYiaTggWo';
 
-type ActiveTab = 'events' | 'chat';
+type ActiveTab = 'events' | 'chat' | 'my-events';
 
 interface User {
     id: number;
@@ -189,7 +189,9 @@ export default function App() {
     const location = useLocation();
 
     const [events, setEvents] = useState<Event[]>([]);
+    const [myEvents, setMyEvents] = useState<Event[]>([]);
     const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+    const [isLoadingMyEvents, setIsLoadingMyEvents] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [purchasingEventId, setPurchasingEventId] = useState<number | null>(null);
 
@@ -214,7 +216,7 @@ export default function App() {
             const data = await response.json();
             setEvents(data);
             return data;
-        } catch (err: any) {
+        } catch (err) {
             console.error('Error fetching events:', err);
             setError('Failed to load events.');
             return [];
@@ -223,9 +225,43 @@ export default function App() {
         }
     }, []);
 
+    const fetchMyEvents = useCallback(async () => {
+        if (!isAuthenticated) {
+            setMyEvents([]);
+            return;
+        }
+        setIsLoadingMyEvents(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/my-events`, {
+                method: 'GET',
+                credentials: 'include',
+            });
+            if (response.status === 401) {
+                await logout();
+                navigate('/login');
+                return;
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            setMyEvents(data);
+        } catch (err) {
+            console.error('Error fetching my events:', err);
+        } finally {
+            setIsLoadingMyEvents(false);
+        }
+    }, [isAuthenticated, logout, navigate]);
+
     useEffect(() => {
         fetchEvents();
     }, [fetchEvents]);
+
+    useEffect(() => {
+        if (activeTab === 'my-events' && isAuthenticated) {
+            fetchMyEvents();
+        }
+    }, [activeTab, isAuthenticated, fetchMyEvents]);
 
     useEffect(() => {
         if (initRan.current === false) {
@@ -259,7 +295,6 @@ export default function App() {
             });
             if (!response.ok) {
                 if (response.status === 401) {
-                    // 🟢 FIX 1: Do NOT navigate here. Just return the authorization error message.
                     return { success: false, message: 'Session expired or not logged in.' };
                 }
                 const data = await response.json().catch(() => ({}));
@@ -287,7 +322,6 @@ export default function App() {
             if (result.success) {
                 await fetchEvents();
             } else {
-                // If purchase fails due to 401, redirect the user here.
                 if (result.message && result.message.includes('Session expired')) {
                     await logout();
                     navigate('/login');
@@ -308,29 +342,29 @@ export default function App() {
         navigate('/');
     };
 
-    const handleDragStart = (e: React.DragEvent<HTMLLIElement>, event: Event) => {
+    const handleDragStart = (e, event) => {
         e.dataTransfer.setData('application/json', JSON.stringify(event));
         e.dataTransfer.effectAllowed = 'move';
     };
 
-    const handleDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
+    const handleDragOver = (e) => {
         e.preventDefault();
         setIsDropTarget(true);
     };
 
-    const handleDragLeave = (e: React.DragEvent<HTMLButtonElement>) => {
+    const handleDragLeave = (e) => {
         e.preventDefault();
         setIsDropTarget(false);
     };
 
-    const handleDrop = (e: React.DragEvent<HTMLButtonElement>) => {
+    const handleDrop = (e) => {
         e.preventDefault();
         setIsDropTarget(false);
         try {
             const eventDataString = e.dataTransfer.getData('application/json');
             if (!eventDataString) return;
 
-            const event = JSON.parse(eventDataString) as Event;
+            const event = JSON.parse(eventDataString);
             setActiveTab('chat');
             setChatInputText(`I'm interested in the "${event.name}" event.`);
         } catch (error) {
@@ -373,14 +407,33 @@ export default function App() {
         );
     };
 
-    const addMessage = (sender: MessageSender, text: string, bookingProposal?: BookingProposal) => {
+    const renderMyEventsContent = () => {
+        if (!isAuthenticated) return <p>Please log in to view your purchased tickets.</p>;
+        if (isLoadingMyEvents) return <p>Loading your tickets...</p>;
+        if (myEvents.length === 0) return <p>You haven't purchased any tickets yet.</p>;
+
+        return (
+            <ul className="event-list">
+                {myEvents.map((event) => (
+                    <li key={event.id} className="event-item my-event-item">
+                        <div className="event-info">
+                            <strong>{event.name}</strong> - {event.date}
+                            <span className="my-ticket-count">Ticket ID: {event.ticket_id}</span>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        );
+    };
+
+    const addMessage = (sender, text, bookingProposal) => {
         setChatMessages(prev => [
             ...prev,
             { id: Date.now().toString() + Math.random(), sender, text, bookingProposal }
         ]);
     };
 
-    const handleSendMessage = async (messageText: string) => {
+    const handleSendMessage = async (messageText) => {
         if (isChatLoading || !chat || !messageText.trim()) return;
 
         addMessage(MessageSender.USER, messageText);
@@ -398,7 +451,7 @@ export default function App() {
         }
     };
 
-    const handleConfirm = async (proposal: BookingProposal) => {
+    const handleConfirm = async (proposal) => {
         const eventToBook = events.find(e => e.name.toLowerCase() === proposal.eventName.toLowerCase());
 
         if (!eventToBook) {
@@ -435,8 +488,8 @@ export default function App() {
         }
 
         await fetchEvents();
+        if (activeTab === 'my-events') await fetchMyEvents();
 
-        // 🟢 FIX 2: Check if the failure was specifically due to authorization (401) and redirect gracefully.
         if (purchaseFailed && failureMessage.includes('Session expired')) {
             await logout();
             navigate('/login');
@@ -455,7 +508,7 @@ export default function App() {
         }
     };
 
-    const handleCancel = async (proposal: BookingProposal) => {
+    const handleCancel = async (proposal) => {
         setChatMessages(prev => prev.map(msg => msg.bookingProposal ? { ...msg, bookingProposal: undefined } : msg));
 
         if (chat) {
@@ -511,6 +564,14 @@ export default function App() {
                         Events
                     </button>
                     <button
+                        className={`tab-button ${activeTab === 'my-events' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('my-events')}
+                        aria-pressed={activeTab === 'my-events'}
+                        disabled={!isAuthenticated}
+                    >
+                        My Events
+                    </button>
+                    <button
                         className={`tab-button ${activeTab === 'chat' ? 'active' : ''} ${isDropTarget ? 'drop-target' : ''}`}
                         onClick={() => setActiveTab('chat')}
                         aria-pressed={activeTab === 'chat'}
@@ -526,6 +587,11 @@ export default function App() {
                     {activeTab === 'events' && (
                         <div className="events-container">
                             {renderEventsContent()}
+                        </div>
+                    )}
+                    {activeTab === 'my-events' && (
+                        <div className="events-container">
+                            {renderMyEventsContent()}
                         </div>
                     )}
                     {activeTab === 'chat' && (
@@ -697,6 +763,12 @@ export default function App() {
                     cursor: grabbing;
                     background-color: #f0eaf8;
                 }
+                .my-event-item {
+                    cursor: default;
+                }
+                .my-event-item:active {
+                    background-color: #f9f9f9;
+                }
                 .event-info { 
                     display: flex; 
                     flex-direction: column; 
@@ -704,6 +776,8 @@ export default function App() {
                     color: #000000;
                 }
                 .ticket-count { font-size: 0.9em; color: #f66733; font-weight: bold; }
+                .my-ticket-count { font-size: 0.9em; color: #522583; font-weight: bold; }
+
                 .buy-button {
                     padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer;
                     font-weight: bold; transition: background-color 0.3s, opacity 0.3s;
