@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { Chat } from '@google/genai';
 import type { ChatMessage as ChatMessageType, BookingProposal, Event } from './types';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 // Import services and components
 import { initChat, sendMessage, confirmBooking, cancelBooking } from './services/geminiService';
@@ -13,7 +14,194 @@ const GEMINI_API_KEY = typeof __api_key !== 'undefined' ? __api_key : 'AIzaSyBv6
 
 type ActiveTab = 'events' | 'chat';
 
+// --- AUTHENTICATION STATE & LOGIC (From AuthContext) ---
+
+interface User {
+    id: number;
+    email: string;
+}
+
+/**
+ * Custom hook to encapsulate the authentication state and logic.
+ * This effectively replaces the AuthProvider and useAuth hook.
+ */
+const useSingleFileAuth = () => {
+    const [user, setUser] = useState<User | null>(null);
+    const isAuthenticated = !!user;
+
+    const handleAuthRequest = async (endpoint: string, email: string, password: string): Promise<User | null> => {
+        try {
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include', // CRITICAL for JWT cookie handling
+                body: JSON.stringify({ email, password }),
+            });
+
+            if (!response.ok) {
+                return null;
+            }
+
+            const data = await response.json();
+            return data.user as User;
+        } catch (error) {
+            return null;
+        }
+    };
+
+    const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+        const userData = await handleAuthRequest('/login', email, password);
+        if (userData) {
+            setUser(userData);
+            return true;
+        }
+        return false;
+    }, []);
+
+    const register = useCallback(async (email: string, password: string): Promise<boolean> => {
+        const userData = await handleAuthRequest('/register', email, password);
+        return !!userData;
+    }, []);
+
+    const logout = useCallback(async () => {
+        try {
+            await fetch(`${API_BASE_URL}/logout`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+        } catch (error) {
+            // Ignore error, reset state anyway
+        } finally {
+            setUser(null);
+        }
+    }, []);
+
+    // Session check on initial load (uses the protected /profile route)
+    useEffect(() => {
+        const verifyAuth = async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/profile`, {
+                    method: 'GET',
+                    credentials: 'include',
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setUser(data.user);
+                } else if (response.status === 401) {
+                    setUser(null);
+                }
+            } catch (error) {
+                setUser(null);
+            }
+        };
+
+        verifyAuth();
+    }, []);
+
+    return { user, isAuthenticated, login, register, logout };
+};
+
+// --- AUTHENTICATION COMPONENTS (From login.tsx and register.tsx) ---
+
+function LoginScreen({ login, navigateToRegister }) {
+    const navigate = useNavigate();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        const success = await login(email, password);
+        if (success) {
+            navigate('/');
+        } else {
+            setError('Invalid credentials.');
+        }
+    };
+
+    return (
+        <div className="auth-container">
+            <h2>Login</h2>
+            <form onSubmit={handleSubmit}>
+                <input
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                />
+                <input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                />
+                {error && <p className="auth-error">{error}</p>}
+                <button type="submit">Login</button>
+            </form>
+            <p className="auth-link" onClick={navigateToRegister}>
+                Need an account? Register here.
+            </p>
+        </div>
+    );
+}
+
+function RegisterScreen({ register, navigateToLogin }) {
+    const navigate = useNavigate();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        const success = await register(email, password);
+        if (success) {
+            // On successful registration, redirect to login
+            navigate('/login');
+        } else {
+            setError('Registration failed. User may already exist.');
+        }
+    };
+
+    return (
+        <div className="auth-container">
+            <h2>Register</h2>
+            <form onSubmit={handleSubmit}>
+                <input
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                />
+                <input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                />
+                {error && <p className="auth-error">{error}</p>}
+                <button type="submit">Create Account</button>
+            </form>
+            <p className="auth-link" onClick={navigateToLogin}>
+                Already have an account? Login here.
+            </p>
+        </div>
+    );
+}
+
+// --- MAIN APPLICATION COMPONENT (App.tsx) ---
+
 export default function App() {
+    const { user, isAuthenticated, login, register, logout } = useSingleFileAuth();
+    const navigate = useNavigate();
+    const location = useLocation();
+
     // --- State for Event Listing ---
     const [events, setEvents] = useState<Event[]>([]);
     const [isLoadingEvents, setIsLoadingEvents] = useState(true);
@@ -64,8 +252,7 @@ export default function App() {
         if (initRan.current === false) {
             const initializeChat = async () => {
                 try {
-                    const chatSession = await initChat();
-                    setChat(chatSession);
+                    const chatSession = await initChat(GEMINI_API_KEY);                    setChat(chatSession);
                     addMessage(
                         MessageSender.BOT,
                         "Hello! I'm the TigerTix Assistant. How can I help you find or book tickets for campus events today?"
@@ -88,8 +275,15 @@ export default function App() {
     const purchaseSingleTicket = async (id: number): Promise<{ success: boolean; message?: string }> => {
         const endpoint = `${API_BASE_URL}/events/${id}/purchase`;
         try {
-            const response = await fetch(endpoint, { method: 'POST' });
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                credentials: 'include', // CRITICAL for protected routes
+            });
             if (!response.ok) {
+                if (response.status === 401) {
+                    navigate('/login');
+                    return { success: false, message: 'Session expired or not logged in. Please log in.' };
+                }
                 const data = await response.json().catch(() => ({}));
                 const errorMessage = data.message || 'Unable to purchase ticket. It might be sold out.';
                 return { success: false, message: errorMessage };
@@ -103,6 +297,10 @@ export default function App() {
 
     // New handler for direct purchase from the events list
     const handleDirectPurchase = async (eventId: number) => {
+        if (!isAuthenticated) {
+            navigate('/login');
+            return;
+        }
         if (purchasingEventId) return; // Prevent multiple clicks while one is in progress
 
         setPurchasingEventId(eventId);
@@ -120,6 +318,11 @@ export default function App() {
         } finally {
             setPurchasingEventId(null);
         }
+    };
+
+    const handleLogout = async () => {
+        await logout();
+        navigate('/');
     };
 
     // --- Drag and Drop Handlers ---
@@ -233,6 +436,12 @@ export default function App() {
         let purchaseFailed = false;
         let failureMessage = '';
 
+        if (!isAuthenticated) {
+            navigate('/login');
+            addMessage(MessageSender.BOT, `Please log in to complete your booking.`);
+            return;
+        }
+
         for (let i = 0; i < proposal.ticketCount; i++) {
             const result = await purchaseSingleTicket(eventToBook.id);
             if (result.success) {
@@ -270,6 +479,95 @@ export default function App() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
 
+    // Conditional rendering based on the current URL path (manual routing)
+    const renderContent = () => {
+        if (location.pathname === '/login') {
+            return <LoginScreen
+                login={login}
+                navigateToRegister={() => navigate('/register')}
+            />;
+        }
+        if (location.pathname === '/register') {
+            return <RegisterScreen
+                register={register}
+                navigateToLogin={() => navigate('/login')}
+            />;
+        }
+
+        // Default (main) application view
+        return (
+            <>
+                <div className="header-row">
+                    <h1>Clemson Campus Events</h1>
+                    <div className="auth-status">
+                        {isAuthenticated ? (
+                            <>
+                                <span className="user-info">Logged in as {user?.email}</span>
+                                <button onClick={handleLogout} className="auth-button">
+                                    Logout
+                                </button>
+                            </>
+                        ) : (
+                            <button onClick={() => navigate('/login')} className="auth-button">
+                                Login
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="tab-navigation">
+                    <button
+                        className={`tab-button ${activeTab === 'events' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('events')}
+                        aria-pressed={activeTab === 'events'}
+                    >
+                        Events
+                    </button>
+                    <button
+                        className={`tab-button ${activeTab === 'chat' ? 'active' : ''} ${isDropTarget ? 'drop-target' : ''}`}
+                        onClick={() => setActiveTab('chat')}
+                        aria-pressed={activeTab === 'chat'}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                    >
+                        TigerTix Assistant
+                    </button>
+                </div>
+
+                <div className="tab-content">
+                    {activeTab === 'events' && (
+                        <div className="events-container">
+                            {renderEventsContent()}
+                        </div>
+                    )}
+                    {activeTab === 'chat' && (
+                        <div className="chat-area-container">
+                            <div className="chat-box">
+                                {chatMessages.map((msg) => (
+                                    <ChatMessage
+                                        key={msg.id}
+                                        message={msg}
+                                        onConfirm={handleConfirm}
+                                        onCancel={handleCancel}
+                                    />
+                                ))}
+                                <div ref={messagesEndRef} />
+                            </div>
+                            <ChatInput
+                                onSendMessage={handleSendMessage}
+                                isLoading={isChatLoading}
+                                isChatReady={!!chat}
+                                value={chatInputText}
+                                onChange={setChatInputText}
+                            />
+                        </div>
+                    )}
+                </div>
+            </>
+        );
+    };
+
     return (
         <div className="App">
             <style>{`
@@ -286,12 +584,41 @@ export default function App() {
                     display: flex;
                     flex-direction: column;
                 }
+                .header-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                    border-bottom: 2px solid #f66733; 
+                    padding-bottom: 10px;
+                }
                 h1 {
                     color: #522583; /* Clemson Purple */
-                    text-align: center;
-                    margin-bottom: 20px;
-                    border-bottom: 2px solid #f66733; /* Clemson Orange accent */
-                    padding-bottom: 10px;
+                    margin: 0;
+                }
+                .auth-status {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                .user-info {
+                    font-size: 0.9em;
+                    color: #522583;
+                    font-weight: bold;
+                }
+                .auth-button {
+                    padding: 5px 10px;
+                    border: 1px solid #f66733;
+                    border-radius: 4px;
+                    background-color: transparent;
+                    color: #f66733;
+                    cursor: pointer;
+                    font-size: 0.9em;
+                    transition: all 0.2s;
+                }
+                .auth-button:hover {
+                    background-color: #f66733;
+                    color: white;
                 }
                 .error-message {
                     color: red;
@@ -299,6 +626,39 @@ export default function App() {
                     padding: 15px;
                     background-color: #fee;
                     border-radius: 8px;
+                }
+
+                /* Auth Specific Styles */
+                .auth-container {
+                    padding: 20px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 15px;
+                }
+                .auth-container input {
+                    padding: 10px;
+                    margin-bottom: 10px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                }
+                .auth-container button {
+                    padding: 12px;
+                    background-color: #522583;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                }
+                .auth-error {
+                    color: red;
+                    text-align: center;
+                    margin-top: 5px;
+                }
+                .auth-link {
+                    color: #f66733;
+                    cursor: pointer;
+                    text-align: center;
+                    font-size: 0.9em;
                 }
                 
                 /* --- Tab Navigation --- */
@@ -398,58 +758,9 @@ export default function App() {
                     .buy-button { width: 100%; }
                 }
             `}</style>
-            <h1>Clemson Campus Events</h1>
 
-            <div className="tab-navigation">
-                <button
-                    className={`tab-button ${activeTab === 'events' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('events')}
-                    aria-pressed={activeTab === 'events'}
-                >
-                    Events
-                </button>
-                <button
-                    className={`tab-button ${activeTab === 'chat' ? 'active' : ''} ${isDropTarget ? 'drop-target' : ''}`}
-                    onClick={() => setActiveTab('chat')}
-                    aria-pressed={activeTab === 'chat'}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                >
-                    TigerTix Assistant
-                </button>
-            </div>
+            {renderContent()}
 
-            <div className="tab-content">
-                {activeTab === 'events' && (
-                    <div className="events-container">
-                        {renderEventsContent()}
-                    </div>
-                )}
-                {activeTab === 'chat' && (
-                    <div className="chat-area-container">
-                        <div className="chat-box">
-                            {chatMessages.map((msg) => (
-                                <ChatMessage
-                                    key={msg.id}
-                                    message={msg}
-                                    onConfirm={handleConfirm}
-                                    onCancel={handleCancel}
-                                />
-                            ))}
-                            <div ref={messagesEndRef} />
-                        </div>
-                        <ChatInput
-                            onSendMessage={handleSendMessage}
-                            isLoading={isChatLoading}
-                            isChatReady={!!chat}
-                            value={chatInputText}
-                            onChange={setChatInputText}
-                        />
-                    </div>
-                )}
-            </div>
         </div>
     );
 }
-//Push to revert
