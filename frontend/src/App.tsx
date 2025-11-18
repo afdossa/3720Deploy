@@ -565,7 +565,12 @@ export default function App() {
                     </button>
                     <button
                         className={`tab-button ${activeTab === 'my-events' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('my-events')}
+                        onClick={() => {
+                            setActiveTab('my-events');
+                            if (isAuthenticated) {
+                                fetchMyEvents();
+                            }
+                        }}
                         aria-pressed={activeTab === 'my-events'}
                         disabled={!isAuthenticated}
                     >
