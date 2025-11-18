@@ -16,6 +16,14 @@ const users = [];
 let userIdCounter = 1;
 // ------------------------------------------
 
+// --- IN-MEMORY EVENT STORAGE (Temporary - Add this) ---
+const events = [
+    { id: 1, title: "Movie Night", date: "2025-12-01", description: "Watching the latest blockbuster." },
+    { id: 2, title: "Study Group", date: "2025-12-05", description: "Reviewing for the final exam." },
+    { id: 3, title: "Hiking Trip", date: "2025-12-10", description: "Scenic hike at the state park." },
+];
+// ------------------------------------------
+
 // --- HELPER FUNCTION: JWT Cookie Generation ---
 const createAndSendToken = (user, res) => {
     const token = jwt.sign({ id: user.id }, JWT_SECRET, {
@@ -138,6 +146,12 @@ const getProfile = (req, res) => {
     });
 };
 
+// --- NEW EVENT CONTROLLER (Add this) ---
+const getEvents = (req, res) => {
+    return res.status(200).json(events);
+};
+
+
 // =======================================================
 // --- ROUTE DEFINITIONS ---
 // =======================================================
@@ -145,6 +159,10 @@ const getProfile = (req, res) => {
 // Public routes
 app.post('/api/register', register);
 app.post('/api/login', login);
+
+// NEW PUBLIC ROUTE FOR EVENTS (Add this)
+app.get('/api/events', getEvents);
+
 app.post('/api/logout', logout);
 
 // Protected route
