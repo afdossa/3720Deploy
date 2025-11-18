@@ -3,7 +3,6 @@ import type { Chat } from '@google/genai';
 import type { ChatMessage as ChatMessageType, BookingProposal, Event } from './types';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-// Import services and components
 import { initChat, sendMessage, confirmBooking, cancelBooking } from './services/geminiService';
 import { ChatMessage } from './components/ChatMessage';
 import { ChatInput } from './components/ChatInput';
@@ -14,17 +13,11 @@ const GEMINI_API_KEY = typeof __api_key !== 'undefined' ? __api_key : 'AIzaSyBv6
 
 type ActiveTab = 'events' | 'chat';
 
-// --- AUTHENTICATION STATE & LOGIC (From AuthContext) ---
-
 interface User {
     id: number;
     email: string;
 }
 
-/**
- * Custom hook to encapsulate the authentication state and logic.
- * This effectively replaces the AuthProvider and useAuth hook.
- */
 const useSingleFileAuth = () => {
     const [user, setUser] = useState<User | null>(null);
     const isAuthenticated = !!user;
@@ -34,7 +27,7 @@ const useSingleFileAuth = () => {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                credentials: 'include', // CRITICAL for JWT cookie handling
+                credentials: 'include',
                 body: JSON.stringify({ email, password }),
             });
 
@@ -70,13 +63,11 @@ const useSingleFileAuth = () => {
                 credentials: 'include',
             });
         } catch (error) {
-            // Ignore error, reset state anyway
         } finally {
             setUser(null);
         }
     }, []);
 
-    // Session check on initial load (uses the protected /profile route)
     useEffect(() => {
         const verifyAuth = async () => {
             try {
@@ -101,8 +92,6 @@ const useSingleFileAuth = () => {
 
     return { user, isAuthenticated, login, register, logout };
 };
-
-// --- AUTHENTICATION COMPONENTS (From login.tsx and register.tsx) ---
 
 function LoginScreen({ login, navigateToRegister }) {
     const navigate = useNavigate();
@@ -160,7 +149,6 @@ function RegisterScreen({ register, navigateToLogin }) {
         setError('');
         const success = await register(email, password);
         if (success) {
-            // On successful registration, redirect to login
             navigate('/login');
         } else {
             setError('Registration failed. User may already exist.');
@@ -195,21 +183,16 @@ function RegisterScreen({ register, navigateToLogin }) {
     );
 }
 
-// --- MAIN APPLICATION COMPONENT (App.tsx) ---
-
 export default function App() {
     const { user, isAuthenticated, login, register, logout } = useSingleFileAuth();
     const navigate = useNavigate();
     const location = useLocation();
 
-    // --- State for Event Listing ---
     const [events, setEvents] = useState<Event[]>([]);
     const [isLoadingEvents, setIsLoadingEvents] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [purchasingEventId, setPurchasingEventId] = useState<number | null>(null);
 
-
-    // --- State for the Chat ---
     const [chat, setChat] = useState<Chat | null>(null);
     const [chatMessages, setChatMessages] = useState<ChatMessageType[]>([]);
     const [isChatLoading, setIsChatLoading] = useState(false);
@@ -217,11 +200,8 @@ export default function App() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const initRan = useRef(false);
 
-
-    // --- State for UI ---
     const [activeTab, setActiveTab] = useState<ActiveTab>('events');
     const [isDropTarget, setIsDropTarget] = useState(false);
-
 
     const fetchEvents = useCallback(async () => {
         setIsLoadingEvents(true);
@@ -247,12 +227,12 @@ export default function App() {
         fetchEvents();
     }, [fetchEvents]);
 
-    // Initialize Chat on component mount
     useEffect(() => {
         if (initRan.current === false) {
             const initializeChat = async () => {
                 try {
-                    const chatSession = await initChat(GEMINI_API_KEY);                    setChat(chatSession);
+                    const chatSession = await initChat(GEMINI_API_KEY);
+                    setChat(chatSession);
                     addMessage(
                         MessageSender.BOT,
                         "Hello! I'm the TigerTix Assistant. How can I help you find or book tickets for campus events today?"
@@ -270,22 +250,20 @@ export default function App() {
         }
     }, []);
 
-
-    // A silent purchase function that doesn't interact with chat state directly.
     const purchaseSingleTicket = async (id: number): Promise<{ success: boolean; message?: string }> => {
         const endpoint = `${API_BASE_URL}/events/${id}/purchase`;
         try {
             const response = await fetch(endpoint, {
                 method: 'POST',
-                credentials: 'include', // CRITICAL for protected routes
+                credentials: 'include',
             });
             if (!response.ok) {
                 if (response.status === 401) {
-                    navigate('/login');
-                    return { success: false, message: 'Session expired or not logged in. Please log in.' };
+                    // 🟢 FIX 1: Do NOT navigate here. Just return the authorization error message.
+                    return { success: false, message: 'Session expired or not logged in.' };
                 }
                 const data = await response.json().catch(() => ({}));
-                const errorMessage = data.message || 'Unable to purchase ticket. It might be sold out.';
+                const errorMessage = data.message || `Unable to purchase ticket. Server status: ${response.status}.`;
                 return { success: false, message: errorMessage };
             }
             return { success: true };
@@ -295,21 +273,26 @@ export default function App() {
         }
     };
 
-    // New handler for direct purchase from the events list
     const handleDirectPurchase = async (eventId: number) => {
         if (!isAuthenticated) {
             navigate('/login');
             return;
         }
-        if (purchasingEventId) return; // Prevent multiple clicks while one is in progress
+        if (purchasingEventId) return;
 
         setPurchasingEventId(eventId);
         try {
             const result = await purchaseSingleTicket(eventId);
 
             if (result.success) {
-                await fetchEvents(); // Refresh the list
+                await fetchEvents();
             } else {
+                // If purchase fails due to 401, redirect the user here.
+                if (result.message && result.message.includes('Session expired')) {
+                    await logout();
+                    navigate('/login');
+                    return;
+                }
                 alert(`Purchase failed: ${result.message}`);
             }
         } catch (err) {
@@ -325,14 +308,13 @@ export default function App() {
         navigate('/');
     };
 
-    // --- Drag and Drop Handlers ---
     const handleDragStart = (e: React.DragEvent<HTMLLIElement>, event: Event) => {
         e.dataTransfer.setData('application/json', JSON.stringify(event));
         e.dataTransfer.effectAllowed = 'move';
     };
 
     const handleDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
-        e.preventDefault(); // Necessary to allow dropping
+        e.preventDefault();
         setIsDropTarget(true);
     };
 
@@ -355,7 +337,6 @@ export default function App() {
             console.error('Failed to parse dropped event data:', error);
         }
     };
-
 
     const renderEventsContent = () => {
         if (isLoadingEvents) return <p>Loading events...</p>;
@@ -403,7 +384,7 @@ export default function App() {
         if (isChatLoading || !chat || !messageText.trim()) return;
 
         addMessage(MessageSender.USER, messageText);
-        setChatInputText(''); // Clear input after sending
+        setChatInputText('');
         setIsChatLoading(true);
 
         try {
@@ -455,6 +436,14 @@ export default function App() {
 
         await fetchEvents();
 
+        // 🟢 FIX 2: Check if the failure was specifically due to authorization (401) and redirect gracefully.
+        if (purchaseFailed && failureMessage.includes('Session expired')) {
+            await logout();
+            navigate('/login');
+            addMessage(MessageSender.BOT, `I was unable to complete the purchase. Your session expired. Please log in again.`);
+            return;
+        }
+
         if (purchaseFailed) {
             addMessage(MessageSender.BOT, `I was only able to purchase ${ticketsPurchased} ticket(s) for "${proposal.eventName}". The booking failed: ${failureMessage}`);
             return;
@@ -479,7 +468,6 @@ export default function App() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
 
-    // Conditional rendering based on the current URL path (manual routing)
     const renderContent = () => {
         if (location.pathname === '/login') {
             return <LoginScreen
@@ -494,7 +482,6 @@ export default function App() {
             />;
         }
 
-        // Default (main) application view
         return (
             <>
                 <div className="header-row">
@@ -571,7 +558,6 @@ export default function App() {
     return (
         <div className="App">
             <style>{`
-                /* --- Main App and General Styles --- */
                 .App {
                     font-family: 'Arial', sans-serif;
                     max-width: 600px;
@@ -593,7 +579,7 @@ export default function App() {
                     padding-bottom: 10px;
                 }
                 h1 {
-                    color: #522583; /* Clemson Purple */
+                    color: #522583;
                     margin: 0;
                 }
                 .auth-status {
@@ -628,7 +614,6 @@ export default function App() {
                     border-radius: 8px;
                 }
 
-                /* Auth Specific Styles */
                 .auth-container {
                     padding: 20px;
                     display: flex;
@@ -661,7 +646,6 @@ export default function App() {
                     font-size: 0.9em;
                 }
                 
-                /* --- Tab Navigation --- */
                 .tab-navigation {
                     display: flex;
                     margin-bottom: 20px;
@@ -687,15 +671,14 @@ export default function App() {
                     border-bottom: 3px solid #f66733;
                 }
                 .tab-button.drop-target {
-                    background-color: #e8e0f1; /* Light Clemson Purple */
+                    background-color: #e8e0f1;
                     border-bottom-color: #522583;
                     transform: scale(1.02);
                 }
 
 
-                /* --- Tab Content --- */
                 .tab-content {
-                    min-height: 500px; /* Give a consistent height */
+                    min-height: 500px;
                     display: flex;
                     flex-direction: column;
                 }
@@ -703,7 +686,6 @@ export default function App() {
                     padding-top: 10px;
                 }
                 
-                /* --- Event List Styles --- */
                 .event-list { list-style: none; padding: 0; }
                 .event-item {
                     display: flex; justify-content: space-between; align-items: center;
@@ -735,13 +717,12 @@ export default function App() {
                     background-color: #f0f0f0; color: #999999; border: 1px solid #ccc;
                 }
 
-                /* --- Chat Styles --- */
                 .chat-area-container {
-                    flex-grow: 1; /* Allow chat to fill the tab content area */
+                    flex-grow: 1;
                     display: flex; flex-direction: column; gap: 15px;
                 }
                 .chat-box {
-                    flex-grow: 1; /* Make chat box take available space */
+                    flex-grow: 1;
                     overflow-y: auto;
                     border: 1px solid #eee;
                     padding: 15px;
