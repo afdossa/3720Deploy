@@ -3,11 +3,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
-// Correct component paths
 import Login from "../../login";
 import Register from "../../register";
 
-// Mock the entire AuthContext module
 vi.mock("../../AuthContext", () => ({
     useAuth: () => ({
         user: null,

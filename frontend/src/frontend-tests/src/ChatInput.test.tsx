@@ -57,7 +57,6 @@ describe('ChatInput Component', () => {
         expect(mockOnSendMessage).toHaveBeenCalledWith('Test message')
     })
 
-    // ✅ FIXED TEST — uses real Enter key event and triggers form submit
     it('calls onSendMessage when Enter key is pressed', async () => {
         render(<ChatInput {...defaultProps} value="Book me a ticket" />)
 

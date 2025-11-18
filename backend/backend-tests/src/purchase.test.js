@@ -4,10 +4,6 @@ import { app } from "./testServer.js";
 
 describe("Protected Routes", () => {
 
-    //
-    // ─── /api/my-events ───────────────────────────────────────────────────────────────
-    //
-
     test("GET /api/my-events responds", async () => {
         const res = await request(app).get("/api/my-events");
         expect(res.status).toBeDefined();
@@ -73,9 +69,6 @@ describe("Protected Routes", () => {
         expect(res.status).toBeDefined();
     });
 
-    //
-    // ─── /api/profile ─────────────────────────────────────────────────────────────────
-    //
 
     test("GET /api/profile responds", async () => {
         const res = await request(app).get("/api/profile");
@@ -137,9 +130,6 @@ describe("Protected Routes", () => {
         expect(res.status).toBeDefined();
     });
 
-    //
-    // ─── GENERAL PROTECTED ROUTES BEHAVIOR ───────────────────────────────────────────
-    //
 
     test("Protected routes handle malformed JSON bodies safely", async () => {
         const res = await request(app)

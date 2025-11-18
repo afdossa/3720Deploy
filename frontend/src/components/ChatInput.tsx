@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SendIcon, MicrophoneIcon } from './Icons';
 
-// Add this to handle vendor prefixes for SpeechRecognition
 declare global {
   interface Window {
     SpeechRecognition: any;

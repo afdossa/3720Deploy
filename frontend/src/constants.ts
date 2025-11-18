@@ -1,7 +1,7 @@
 
 import { Event } from './types';
 
-// Mock data is used for the "Offline Mode" when the backend is not available.
+//Fallback for tests
 export const MOCK_EVENTS: Event[] = [
   { id: 1, name: 'Clemson Football Game', date: '2025-09-01', tickets_available: 100 },
   { id: 2, name: 'Campus Concert', date: '2025-09-10', tickets_available: 50 },

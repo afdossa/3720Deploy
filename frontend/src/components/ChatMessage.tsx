@@ -1,6 +1,5 @@
 
 import React from 'react';
-// Fix: Aliased the imported `ChatMessage` type to `ChatMessageType` to resolve the name collision with the `ChatMessage` component.
 import type { ChatMessage as ChatMessageType, BookingProposal } from '../types';
 import { MessageSender } from '../types';
 import { BotIcon, UserIcon } from './Icons';

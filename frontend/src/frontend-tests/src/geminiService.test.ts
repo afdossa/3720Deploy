@@ -7,7 +7,6 @@ import {
 } from "../../services/geminiService.ts";
 import { MOCK_EVENTS } from "../../constants.ts";
 
-// Hard override the entire GoogleGenAI module
 vi.mock("@google/genai", () => {
     return {
         GoogleGenAI: class {
@@ -19,7 +18,6 @@ vi.mock("@google/genai", () => {
             };
         },
 
-        // minimal Type constants your file expects
         Type: {
             OBJECT: "object",
             STRING: "string",

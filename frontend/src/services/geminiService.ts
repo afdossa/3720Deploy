@@ -7,7 +7,6 @@ let ai: GoogleGenAI;
 
 function getGoogleAI() {
   if (!ai) {
-    // FIX: The API key must be obtained from process.env.API_KEY.
     ai = new GoogleGenAI({ apiKey: "AIzaSyBv69e52kItIMFiYqyneoPD_urYiaTggWo" });
   }
   return ai;
