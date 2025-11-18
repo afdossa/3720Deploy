@@ -2,7 +2,7 @@
 // (or frontend/src/components/frontend-tests/src/AuthContext.test.tsx if placed there)
 
 import { render, screen, waitFor } from '@testing-library/react';
-import { AuthProvider, useAuth } from './AuthContext'; // Adjust path
+import { AuthProvider, useAuth } from './App.test.tsx';
 import '@testing-library/jest-dom';
 
 // A simple component to consume the AuthContext for testing
