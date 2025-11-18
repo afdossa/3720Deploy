@@ -16,7 +16,7 @@ const users = [];
 let userIdCounter = 1;
 // ------------------------------------------
 
-// --- IN-MEMORY EVENT STORAGE (Temporary - Add this) ---
+// --- IN-MEMORY EVENT STORAGE (Temporary) ---
 const events = [
     { id: 1, title: "Movie Night", date: "2025-12-01", description: "Watching the latest blockbuster." },
     { id: 2, title: "Study Group", date: "2025-12-05", description: "Reviewing for the final exam." },
@@ -39,8 +39,8 @@ const createAndSendToken = (user, res) => {
 };
 
 // =======================================================
-// --- CRITICAL MANUAL CORS OVERRIDE MIDDLEWARE ---
-// This middleware aggressively sets the required headers on every request.
+// --- CRITICAL MANUAL CORS OVERRIDE MIDDLEWARE (AND PREFLIGHT FIX) ---
+// This section is placed first to ensure the critical headers are always set.
 // =======================================================
 app.use((req, res, next) => {
     // 1. MUST be the specific origin for credentials: 'include'
@@ -52,14 +52,16 @@ app.use((req, res, next) => {
     // 4. Allowed headers
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    // Handle preflight requests (OPTIONS method) explicitly
+    // Handle preflight requests (OPTIONS method) explicitly and immediately
     if (req.method === 'OPTIONS') {
+        // End the request here with the 200 status code
         return res.sendStatus(200);
     }
 
     next();
 });
 
+// These must be defined AFTER the CORS middleware
 app.use(cookieParser());
 app.use(express.json());
 
@@ -146,11 +148,17 @@ const getProfile = (req, res) => {
     });
 };
 
-// --- NEW EVENT CONTROLLER (Add this) ---
 const getEvents = (req, res) => {
     return res.status(200).json(events);
 };
 
+// --- NEW CONTROLLER: Event Purchase (Add this) ---
+const purchaseEvent = (req, res) => {
+    const eventId = req.params.id;
+    // In a real app, you would verify the user (via req.user) and update the database
+    // For this in-memory example, we just return success
+    return res.status(200).json({ message: `Event ${eventId} purchased successfully.` });
+};
 
 // =======================================================
 // --- ROUTE DEFINITIONS ---
@@ -160,8 +168,10 @@ const getEvents = (req, res) => {
 app.post('/api/register', register);
 app.post('/api/login', login);
 
-// NEW PUBLIC ROUTE FOR EVENTS (Add this)
+// Event routes
 app.get('/api/events', getEvents);
+// NEW ROUTE: Fixes the 404 for event purchasing (Add this)
+app.post('/api/events/:id/purchase', protect, purchaseEvent);
 
 app.post('/api/logout', logout);
 
