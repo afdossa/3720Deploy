@@ -23,26 +23,38 @@ const initializeDB = async () => {
             driver: sqlite3.Database
         });
 
-        // Create Users table (for persistence)
+        // 1. Create Users table
         await db.run(`
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                 email TEXT UNIQUE NOT NULL,
+                                                 password TEXT NOT NULL
             );
         `);
 
-        // Create Events table and populate with sample data if empty
+        // 2. Create Events table
         await db.run(`
             CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                date TEXT NOT NULL,
-                tickets_available INTEGER NOT NULL DEFAULT 0
+                                                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                  name TEXT NOT NULL,
+                                                  date TEXT NOT NULL,
+                                                  tickets_available INTEGER NOT NULL DEFAULT 0
             );
         `);
 
-        // Initial population (uses INSERT OR IGNORE to prevent duplicates on restart)
+        // 3. Create Tickets table (NEW: Links users and events)
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS tickets (
+                                                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                   user_id INTEGER NOT NULL,
+                                                   event_id INTEGER NOT NULL,
+                                                   purchase_date TEXT NOT NULL,
+                                                   FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (event_id) REFERENCES events(id)
+                );
+        `);
+
+        // Initial event population
         await db.run(`
             INSERT OR IGNORE INTO events (id, name, date, tickets_available) VALUES
             (1, 'Clemson Football Game', '2025-09-01', 100),
@@ -67,7 +79,6 @@ const initializeDB = async () => {
     }
 };
 
-// Start the database and server sequence
 initializeDB();
 
 // --- HELPER FUNCTION: JWT Cookie Generation ---
@@ -100,7 +111,7 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 app.use(express.json());
 
-// --- AUTHENTICATION MIDDLEWARE: protect() (Uses DB) ---
+// --- AUTHENTICATION MIDDLEWARE: protect() ---
 const protect = async (req, res, next) => {
     const token = req.cookies.jwt;
     if (!token) {
@@ -108,13 +119,11 @@ const protect = async (req, res, next) => {
     }
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        // Find user by id in SQLite
         const user = await db.get('SELECT id, email FROM users WHERE id = ?', [decoded.id]);
 
         if (!user) {
             return res.status(401).json({ message: 'User belonging to this token no longer exists.' });
         }
-        // Store user info in request object
         req.user = { id: user.id, email: user.email };
         next();
     } catch (err) {
@@ -126,7 +135,7 @@ const protect = async (req, res, next) => {
     }
 };
 
-// --- CONTROLLER LOGIC (Uses DB) ---
+// --- CONTROLLER LOGIC ---
 const register = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
@@ -137,7 +146,6 @@ const register = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Insert user into SQLite
         const result = await db.run('INSERT INTO users (email, password) VALUES (?, ?)', [email, hashedPassword]);
         const newUser = { id: result.lastID, email };
 
@@ -156,7 +164,6 @@ const login = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
 
-    // Find user in SQLite
     const user = await db.get('SELECT id, email, password FROM users WHERE email = ?', [email]);
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
@@ -194,7 +201,6 @@ const getProfile = (req, res) => {
 
 const getEvents = async (req, res) => {
     try {
-        // Retrieve all events from SQLite
         const events = await db.all('SELECT id, name, date, tickets_available FROM events');
         return res.status(200).json(events);
     } catch (err) {
@@ -203,10 +209,35 @@ const getEvents = async (req, res) => {
     }
 };
 
+const getMyEvents = async (req, res) => {
+    if (!req.user) {
+        return res.status(401).json({ message: 'Authentication required to view tickets.' });
+    }
+    const userId = req.user.id;
+    try {
+        const myTickets = await db.all(`
+            SELECT 
+                t.id AS ticket_id,
+                e.id, 
+                e.name, 
+                e.date
+            FROM tickets t
+            JOIN events e ON t.event_id = e.id
+            WHERE t.user_id = ?
+            ORDER BY e.date DESC
+        `, [userId]);
+
+        return res.status(200).json(myTickets);
+    } catch (err) {
+        console.error('Error fetching user tickets:', err);
+        return res.status(500).json({ message: 'Error retrieving user tickets from database' });
+    }
+};
+
 const purchaseEvent = async (req, res) => {
     const eventId = req.params.id;
+    const userId = req.user.id;
 
-    // Use a transaction to ensure atomicity
     await db.run('BEGIN TRANSACTION');
     try {
         // 1. Check event and tickets
@@ -223,6 +254,12 @@ const purchaseEvent = async (req, res) => {
 
         // 2. Decrement ticket count
         await db.run('UPDATE events SET tickets_available = tickets_available - 1 WHERE id = ?', [eventId]);
+
+        // 3. Record the ticket purchase (NEW)
+        await db.run(
+            'INSERT INTO tickets (user_id, event_id, purchase_date) VALUES (?, ?, ?)',
+            [userId, eventId, new Date().toISOString()]
+        );
 
         await db.run('COMMIT');
 
@@ -242,6 +279,7 @@ const purchaseEvent = async (req, res) => {
 app.post('/api/register', register);
 app.post('/api/login', login);
 app.get('/api/events', getEvents);
+app.get('/api/my-events', protect, getMyEvents); // NEW ROUTE
 app.post('/api/events/:id/purchase', protect, purchaseEvent);
 app.post('/api/logout', logout);
 app.get('/api/profile', protect, getProfile);
