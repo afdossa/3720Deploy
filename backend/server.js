@@ -5,26 +5,20 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// --- CONFIGURATION ---
 const frontendOrigin = 'https://afdossa.github.io';
-const JWT_SECRET = 'your_super_secret_jwt_key'; // CHANGE THIS
+const JWT_SECRET = 'your_super_secret_jwt_key';
 const TOKEN_EXPIRATION = '30m';
-const PORT = 5000; // Local fallback port
+const PORT = 5000;
 
-// --- IN-MEMORY USER STORAGE (Temporary - Replace with DB model!) ---
 const users = [];
 let userIdCounter = 1;
-// ------------------------------------------
 
-// --- IN-MEMORY EVENT STORAGE (Temporary) ---
 const events = [
     { id: 1, title: "Movie Night", date: "2025-12-01", description: "Watching the latest blockbuster." },
     { id: 2, title: "Study Group", date: "2025-12-05", description: "Reviewing for the final exam." },
     { id: 3, title: "Hiking Trip", date: "2025-12-10", description: "Scenic hike at the state park." },
 ];
-// ------------------------------------------
 
-// --- HELPER FUNCTION: JWT Cookie Generation ---
 const createAndSendToken = (user, res) => {
     const token = jwt.sign({ id: user.id }, JWT_SECRET, {
         expiresIn: TOKEN_EXPIRATION,
@@ -38,36 +32,22 @@ const createAndSendToken = (user, res) => {
     });
 };
 
-// =======================================================
-// --- CRITICAL MANUAL CORS OVERRIDE MIDDLEWARE (AND PREFLIGHT FIX) ---
-// This section is placed first to ensure the critical headers are always set.
-// =======================================================
 app.use((req, res, next) => {
-    // 1. MUST be the specific origin for credentials: 'include'
     res.header('Access-Control-Allow-Origin', frontendOrigin);
-    // 2. MUST be true for cookies/credentials
     res.header('Access-Control-Allow-Credentials', 'true');
-    // 3. Allowed methods
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    // 4. Allowed headers
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    // Handle preflight requests (OPTIONS method) explicitly and immediately
     if (req.method === 'OPTIONS') {
-        // End the request here with the 200 status code
         return res.sendStatus(200);
     }
 
     next();
 });
 
-// These must be defined AFTER the CORS middleware
 app.use(cookieParser());
 app.use(express.json());
 
-// =======================================================
-// --- AUTHENTICATION MIDDLEWARE: protect() ---
-// =======================================================
 const protect = async (req, res, next) => {
     const token = req.cookies.jwt;
     if (!token) {
@@ -90,9 +70,6 @@ const protect = async (req, res, next) => {
     }
 };
 
-// =======================================================
-// --- CONTROLLER LOGIC ---
-// =======================================================
 const register = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
@@ -152,33 +129,31 @@ const getEvents = (req, res) => {
     return res.status(200).json(events);
 };
 
-// --- NEW CONTROLLER: Event Purchase (Add this) ---
 const purchaseEvent = (req, res) => {
     const eventId = req.params.id;
-    // In a real app, you would verify the user (via req.user) and update the database
-    // For this in-memory example, we just return success
     return res.status(200).json({ message: `Event ${eventId} purchased successfully.` });
 };
 
-// =======================================================
-// --- ROUTE DEFINITIONS ---
-// =======================================================
-
-// Public routes
+// Route Definitions
 app.post('/api/register', register);
 app.post('/api/login', login);
-
-// Event routes
 app.get('/api/events', getEvents);
-// NEW ROUTE: Fixes the 404 for event purchasing (Add this)
 app.post('/api/events/:id/purchase', protect, purchaseEvent);
-
 app.post('/api/logout', logout);
-
-// Protected route
 app.get('/api/profile', protect, getProfile);
 
-// --- SERVER START (FIXED PORT USAGE) ---
+// Catch-all for undefined routes (404)
+app.use((req, res) => {
+    res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
+});
+
 const finalPort = process.env.PORT || PORT;
 
-app.listen(finalPort, () => console.log(`Server running on port ${finalPort}`));
+// Explicit logging for debugging Render port issue
+app.listen(finalPort, () => {
+    console.log(`--- PORT DEBUG ---`);
+    console.log(`Express Server STARTING on port: ${finalPort}`);
+    console.log(`Raw process.env.PORT is: ${process.env.PORT}`);
+    console.log(`Fallback PORT is: ${PORT}`);
+    console.log(`------------------`);
+});
