@@ -14,9 +14,9 @@ const users = [];
 let userIdCounter = 1;
 
 const events = [
-    { id: 1, title: "Movie Night", date: "2025-12-01", description: "Watching the latest blockbuster." },
-    { id: 2, title: "Study Group", date: "2025-12-05", description: "Reviewing for the final exam." },
-    { id: 3, title: "Hiking Trip", date: "2025-12-10", description: "Scenic hike at the state park." },
+    { id: 1, name: "Movie Night", date: "2025-12-01", description: "Watching the latest blockbuster.", tickets_available: 50 },
+    { id: 2, name: "Study Group", date: "2025-12-05", description: "Reviewing for the final exam.", tickets_available: 15 },
+    { id: 3, name: "Hiking Trip", date: "2025-12-10", description: "Scenic hike at the state park.", tickets_available: 100 },
 ];
 
 const createAndSendToken = (user, res) => {
@@ -134,7 +134,6 @@ const purchaseEvent = (req, res) => {
     return res.status(200).json({ message: `Event ${eventId} purchased successfully.` });
 };
 
-// Route Definitions
 app.post('/api/register', register);
 app.post('/api/login', login);
 app.get('/api/events', getEvents);
@@ -142,14 +141,12 @@ app.post('/api/events/:id/purchase', protect, purchaseEvent);
 app.post('/api/logout', logout);
 app.get('/api/profile', protect, getProfile);
 
-// Catch-all for undefined routes (404)
 app.use((req, res) => {
     res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
 });
 
 const finalPort = process.env.PORT || PORT;
 
-// Explicit logging for debugging Render port issue
 app.listen(finalPort, () => {
     console.log(`--- PORT DEBUG ---`);
     console.log(`Express Server STARTING on port: ${finalPort}`);
