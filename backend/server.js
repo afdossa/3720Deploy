@@ -2,6 +2,9 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const sqlite = require('sqlite');
+const sqlite3 = require('sqlite3');
+const path = require('path');
 
 const app = express();
 
@@ -9,16 +12,65 @@ const frontendOrigin = 'https://afdossa.github.io';
 const JWT_SECRET = 'your_super_secret_jwt_key';
 const TOKEN_EXPIRATION = '30m';
 const PORT = 5000;
+const DB_FILE = path.join(__dirname, 'tiger_tix.db');
+let db;
 
-const users = [];
-let userIdCounter = 1;
+// --- DATABASE INITIALIZATION ---
+const initializeDB = async () => {
+    try {
+        db = await sqlite.open({
+            filename: DB_FILE,
+            driver: sqlite3.Database
+        });
 
-const events = [
-    { id: 1, name: "Movie Night", date: "2025-12-01", description: "Watching the latest blockbuster.", tickets_available: 50 },
-    { id: 2, name: "Study Group", date: "2025-12-05", description: "Reviewing for the final exam.", tickets_available: 15 },
-    { id: 3, name: "Hiking Trip", date: "2025-12-10", description: "Scenic hike at the state park.", tickets_available: 100 },
-];
+        // Create Users table (for persistence)
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            );
+        `);
 
+        // Create Events table and populate with sample data if empty
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                date TEXT NOT NULL,
+                tickets_available INTEGER NOT NULL DEFAULT 0
+            );
+        `);
+
+        // Initial population (uses INSERT OR IGNORE to prevent duplicates on restart)
+        await db.run(`
+            INSERT OR IGNORE INTO events (id, name, date, tickets_available) VALUES
+            (1, 'Clemson Football Game', '2025-09-01', 100),
+            (2, 'Campus Concert', '2025-09-10', 50),
+            (3, 'Career Fair', '2025-09-15', 200);
+        `);
+
+        console.log('SQLite database initialized successfully.');
+
+        const finalPort = process.env.PORT || PORT;
+        app.listen(finalPort, () => {
+            console.log('--- PORT DEBUG ---');
+            console.log(`Express Server STARTING on port: ${finalPort}`);
+            console.log(`Raw process.env.PORT is: ${process.env.PORT}`);
+            console.log(`Fallback PORT is: ${PORT}`);
+            console.log('------------------');
+        });
+
+    } catch (err) {
+        console.error('Database initialization error:', err);
+        process.exit(1);
+    }
+};
+
+// Start the database and server sequence
+initializeDB();
+
+// --- HELPER FUNCTION: JWT Cookie Generation ---
 const createAndSendToken = (user, res) => {
     const token = jwt.sign({ id: user.id }, JWT_SECRET, {
         expiresIn: TOKEN_EXPIRATION,
@@ -48,6 +100,7 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 app.use(express.json());
 
+// --- AUTHENTICATION MIDDLEWARE: protect() (Uses DB) ---
 const protect = async (req, res, next) => {
     const token = req.cookies.jwt;
     if (!token) {
@@ -55,10 +108,13 @@ const protect = async (req, res, next) => {
     }
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = users.find(u => u.id === decoded.id);
+        // Find user by id in SQLite
+        const user = await db.get('SELECT id, email FROM users WHERE id = ?', [decoded.id]);
+
         if (!user) {
             return res.status(401).json({ message: 'User belonging to this token no longer exists.' });
         }
+        // Store user info in request object
         req.user = { id: user.id, email: user.email };
         next();
     } catch (err) {
@@ -70,14 +126,21 @@ const protect = async (req, res, next) => {
     }
 };
 
+// --- CONTROLLER LOGIC (Uses DB) ---
 const register = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
-    if (users.find(u => u.email === email)) return res.status(409).json({ message: 'User already exists' });
+
     try {
+        const existingUser = await db.get('SELECT email FROM users WHERE email = ?', [email]);
+        if (existingUser) return res.status(409).json({ message: 'User already exists' });
+
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = { id: userIdCounter++, email, password: hashedPassword };
-        users.push(newUser);
+
+        // Insert user into SQLite
+        const result = await db.run('INSERT INTO users (email, password) VALUES (?, ?)', [email, hashedPassword]);
+        const newUser = { id: result.lastID, email };
+
         createAndSendToken(newUser, res);
         return res.status(201).json({
             message: 'User registered successfully',
@@ -92,11 +155,15 @@ const register = async (req, res) => {
 const login = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
-    const user = users.find(u => u.email === email);
+
+    // Find user in SQLite
+    const user = await db.get('SELECT id, email, password FROM users WHERE email = ?', [email]);
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+
     try {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
+
         createAndSendToken(user, res);
         return res.status(200).json({
             message: 'Login successful',
@@ -125,15 +192,53 @@ const getProfile = (req, res) => {
     });
 };
 
-const getEvents = (req, res) => {
-    return res.status(200).json(events);
+const getEvents = async (req, res) => {
+    try {
+        // Retrieve all events from SQLite
+        const events = await db.all('SELECT id, name, date, tickets_available FROM events');
+        return res.status(200).json(events);
+    } catch (err) {
+        console.error('Error fetching events:', err);
+        return res.status(500).json({ message: 'Error retrieving events from database' });
+    }
 };
 
-const purchaseEvent = (req, res) => {
+const purchaseEvent = async (req, res) => {
     const eventId = req.params.id;
-    return res.status(200).json({ message: `Event ${eventId} purchased successfully.` });
+
+    // Use a transaction to ensure atomicity
+    await db.run('BEGIN TRANSACTION');
+    try {
+        // 1. Check event and tickets
+        const event = await db.get('SELECT id, name, tickets_available FROM events WHERE id = ?', [eventId]);
+
+        if (!event) {
+            await db.run('ROLLBACK');
+            return res.status(404).json({ message: 'Event not found.' });
+        }
+        if (event.tickets_available <= 0) {
+            await db.run('ROLLBACK');
+            return res.status(400).json({ message: 'Tickets sold out.' });
+        }
+
+        // 2. Decrement ticket count
+        await db.run('UPDATE events SET tickets_available = tickets_available - 1 WHERE id = ?', [eventId]);
+
+        await db.run('COMMIT');
+
+        const updatedTickets = event.tickets_available - 1;
+
+        return res.status(200).json({
+            message: `Event ${event.name} purchased successfully. Remaining: ${updatedTickets}`
+        });
+    } catch (err) {
+        await db.run('ROLLBACK');
+        console.error('Purchase error:', err);
+        return res.status(500).json({ message: 'Server error during purchase.' });
+    }
 };
 
+// Route Definitions
 app.post('/api/register', register);
 app.post('/api/login', login);
 app.get('/api/events', getEvents);
@@ -143,14 +248,4 @@ app.get('/api/profile', protect, getProfile);
 
 app.use((req, res) => {
     res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
-});
-
-const finalPort = process.env.PORT || PORT;
-
-app.listen(finalPort, () => {
-    console.log(`--- PORT DEBUG ---`);
-    console.log(`Express Server STARTING on port: ${finalPort}`);
-    console.log(`Raw process.env.PORT is: ${process.env.PORT}`);
-    console.log(`Fallback PORT is: ${PORT}`);
-    console.log(`------------------`);
 });
