@@ -15,7 +15,6 @@ const PORT = 5000;
 const DB_FILE = path.join(__dirname, 'tiger_tix.db');
 let db;
 
-// --- DATABASE INITIALIZATION ---
 const initializeDB = async () => {
     try {
         db = await sqlite.open({
@@ -23,7 +22,6 @@ const initializeDB = async () => {
             driver: sqlite3.Database
         });
 
-        // 1. Create Users table
         await db.run(`
             CREATE TABLE IF NOT EXISTS users (
                                                  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +30,6 @@ const initializeDB = async () => {
             );
         `);
 
-        // 2. Create Events table
         await db.run(`
             CREATE TABLE IF NOT EXISTS events (
                                                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +39,6 @@ const initializeDB = async () => {
             );
         `);
 
-        // 3. Create Tickets table (NEW: Links users and events)
         await db.run(`
             CREATE TABLE IF NOT EXISTS tickets (
                                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +50,6 @@ const initializeDB = async () => {
                 );
         `);
 
-        // Initial event population
         await db.run(`
             INSERT OR IGNORE INTO events (id, name, date, tickets_available) VALUES
             (1, 'Clemson Football Game', '2025-09-01', 100),
@@ -81,17 +76,18 @@ const initializeDB = async () => {
 
 initializeDB();
 
-// --- HELPER FUNCTION: JWT Cookie Generation ---
 const createAndSendToken = (user, res) => {
     const token = jwt.sign({ id: user.id }, JWT_SECRET, {
         expiresIn: TOKEN_EXPIRATION,
     });
 
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+
     res.cookie('jwt', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         maxAge: 30 * 60 * 1000,
-        sameSite: 'Lax',
+        sameSite: isProduction ? 'None' : 'Lax',
     });
 };
 
@@ -111,7 +107,6 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 app.use(express.json());
 
-// --- AUTHENTICATION MIDDLEWARE: protect() ---
 const protect = async (req, res, next) => {
     const token = req.cookies.jwt;
     if (!token) {
@@ -135,7 +130,6 @@ const protect = async (req, res, next) => {
     }
 };
 
-// --- CONTROLLER LOGIC ---
 const register = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
@@ -216,13 +210,13 @@ const getMyEvents = async (req, res) => {
     const userId = req.user.id;
     try {
         const myTickets = await db.all(`
-            SELECT 
+            SELECT
                 t.id AS ticket_id,
-                e.id, 
-                e.name, 
+                e.id,
+                e.name,
                 e.date
             FROM tickets t
-            JOIN events e ON t.event_id = e.id
+                     JOIN events e ON t.event_id = e.id
             WHERE t.user_id = ?
             ORDER BY e.date DESC
         `, [userId]);
@@ -240,7 +234,6 @@ const purchaseEvent = async (req, res) => {
 
     await db.run('BEGIN TRANSACTION');
     try {
-        // 1. Check event and tickets
         const event = await db.get('SELECT id, name, tickets_available FROM events WHERE id = ?', [eventId]);
 
         if (!event) {
@@ -252,10 +245,8 @@ const purchaseEvent = async (req, res) => {
             return res.status(400).json({ message: 'Tickets sold out.' });
         }
 
-        // 2. Decrement ticket count
         await db.run('UPDATE events SET tickets_available = tickets_available - 1 WHERE id = ?', [eventId]);
 
-        // 3. Record the ticket purchase (NEW)
         await db.run(
             'INSERT INTO tickets (user_id, event_id, purchase_date) VALUES (?, ?, ?)',
             [userId, eventId, new Date().toISOString()]
@@ -275,11 +266,10 @@ const purchaseEvent = async (req, res) => {
     }
 };
 
-// Route Definitions
 app.post('/api/register', register);
 app.post('/api/login', login);
 app.get('/api/events', getEvents);
-app.get('/api/my-events', protect, getMyEvents); // NEW ROUTE
+app.get('/api/my-events', protect, getMyEvents);
 app.post('/api/events/:id/purchase', protect, purchaseEvent);
 app.post('/api/logout', logout);
 app.get('/api/profile', protect, getProfile);
